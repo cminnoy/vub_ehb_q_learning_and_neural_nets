@@ -7,6 +7,8 @@
 #include <thread>
 #include <chrono>
 
+// Double Q-Learning based on 2015 paper of van Hasselt et al. (https://arxiv.org/abs/1509.06461)
+
 // Define actions
 enum class Action { Up, Down, Left, Right };
 
@@ -150,11 +152,12 @@ const double REWARD_CAT = -10.0;
 const double REWARD_EMPTY = -1.0;
 
 // Hyperparameters
-double epsilon = 1.0;       // Exploration probability
+double epsilon = 1.0;
 const double epsilon_min = 0.01;
 const double epsilon_decay = 0.995;
 const double learning_rate = 0.1;
-const double Gamma = 0.9; // Discount factor
+const double Gamma = 0.9;
+const double tau = 0.005; // Soft update factor
 const int GRID_SIZE = 3;
 
 // Function to get reward
@@ -254,10 +257,11 @@ void printGrid(const State& pigeon) {
 
 int main() {
     NeuralNetwork net(2, 10, 4);
+    NeuralNetwork target_net = net; // Target network
     int episodes = 1000;
 
     double max_reward = -std::numeric_limits<double>::infinity();
-    int max_reward_encountered = 0;
+    unsigned int max_reward_encountered = 0;
     const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
 
     for (int episode = 0; episode < episodes; ++episode) {
@@ -276,15 +280,24 @@ int main() {
             double reward = getReward(next_state);
             total_reward += reward;
 
-            // Update neural network
-            std::vector<double> target(4, 0.0);
+            // Update Q-values using DDQN
             std::vector<double> q_values = net.forward(pigeon);
-            target[static_cast<int>(action)] = reward + Gamma * *std::max_element(q_values.begin(), q_values.end());
+            std::vector<double> target_q_values = q_values;
 
-            // Backpropagation
-            net.backward(pigeon, target, learning_rate);
+            if (isTerminal(next_state)) {
+                target_q_values[static_cast<int>(action)] = reward;
+            } else {
+                std::vector<double> next_q_values = net.forward(next_state);
+                std::vector<double> target_q_values_next = target_net.forward(next_state);
+                int best_action = std::distance(next_q_values.begin(), std::max_element(next_q_values.begin(), next_q_values.end()));
+                target_q_values[static_cast<int>(action)] = reward + Gamma * target_q_values_next[best_action];
+            }
+
+            // Train the network
+            net.backward(pigeon, target_q_values, learning_rate);
 
             pigeon = next_state; // Move to next state
+
             std::cout << "Total reward: " << total_reward << '\n';
         }
 
@@ -297,35 +310,47 @@ int main() {
         } else {
             max_reward_encountered++; // Increment counter if reward remains the same
         }
-        if (max_reward_encountered >= early_stopping_threshold) {
-            std::cout << "Early stopping triggered after " << episode + 1
-                    << " episodes. Max reward = " << max_reward << ".\n";
+        if (max_reward_encountered > early_stopping_threshold) {
+            std::cout << "Early stopping triggered at episode: " << episode << "\n";
+            target_net = net;
             break;
         }
 
+        // Periodically update the target network
+        if (episode % 10 == 0) {
+            target_net = net;
+        }
+
         // Decay epsilon
-        epsilon = std::max(epsilon * epsilon_decay, epsilon_min);
-       
-        std::cout << "Episode " << episode + 1 << " ended with points = " << total_reward << ".\n";
+        epsilon = std::max(epsilon_min, epsilon * epsilon_decay);
+
+        std::cout << "Episode " << episode << " Total Reward: " << total_reward << "\n";
     }
 
     std::cout << "Training complete.\n";
 
     // After training loop
     std::cout << "Final Neural Network State:\n";
-    net.print();
+    target_net.print();
 
     // Test the final policy
     std::cout << "Testing the final policy:\n";
     State pigeon = {2, 0};
     printGrid(pigeon);
+    unsigned int steps = 0;
     while (!isTerminal(pigeon)) {
-        Action action = chooseAction(pigeon, net);
+        ++steps;
+        Action action = chooseAction(pigeon, target_net);
         pigeon = takeAction(pigeon, action);
         std::cout << "Action taken: " << actionToString(action) << std::endl;
         printGrid(pigeon);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (steps > 10) {
+            std::cout << "Too many steps. Exiting.\n";
+            break;
+        }
     }
     std::cout << "Game Over.\n";
+
     return 0;
 }
