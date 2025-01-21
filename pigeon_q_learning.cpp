@@ -6,6 +6,7 @@
 #include <tuple>
 #include <string>
 #include <iomanip>
+#include <thread>
 #include <functional>
 
 // Define actions
@@ -194,17 +195,14 @@ State getRandomStartPosition() {
 }
 
 int main() {
-    //State pigeon = {2, 0}; // Starting position
-    int max_reward_encountered = 0;
-    double max_reward = -std::numeric_limits<double>::infinity();
-    int iterations = 1000; // Number of iterations for training
+    unsigned int episodes = 1000; // Number of episodes for training
 
-    for (int episode = 0; episode < iterations; ++episode) {
-#if 0
-        State pigeon = getRandomStartPosition();
-#else
+    double max_reward = -std::numeric_limits<double>::infinity();
+    unsigned int max_reward_encountered = 0;
+    const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
+
+    for (int episode = 0; episode < episodes; ++episode) {
         State pigeon = {2, 0}; // Reset to start position
-#endif
         double total_reward = 0.0;
 
         while (!isTerminal(pigeon)) {
@@ -232,18 +230,10 @@ int main() {
             std::cout << "Updated Q-value for state (" << pigeon.first << "," << pigeon.second << ") and action " << actionToString(action) << ": " << old_q_value << " -> " << new_q_value << std::endl;
 
             pigeon = next_state; // Move to the next state
-
             std::cout << "Total reward: " << total_reward << '\n';
-
-            printQTable();
-
-            if (isTerminal(pigeon)) {
-                printGrid(pigeon);
-                std::cout << "Episode " << episode + 1 << " ended with points = " << total_reward << ".\n";
-                break;
-            }
         }
 
+        // Early stopping logic
         if (total_reward < max_reward) {
             max_reward_encountered = 0;
         } else if (total_reward > max_reward) {
@@ -252,17 +242,34 @@ int main() {
         } else {
             max_reward_encountered++;
         }
-
-        if (max_reward_encountered >= 10) {
-            std::cout << "Early stopping. Got 10 episodes with max reward of " << max_reward << " in a row." << std::endl;
+        if (max_reward_encountered >= early_stopping_threshold) {
+            std::cout << "Early stopping triggered after " << episode + 1 << " episodes. Max reward = " << max_reward << ".\n";
             break;
         }
 
         // Decay epsilon
         epsilon = std::max(epsilon * epsilon_decay, epsilon_min);
+
+        std::cout << "Episode " << episode + 1 << " ended with points = " << total_reward << ".\n";
     }
 
     std::cout << "Training complete.\n";
+
+    // After training loop
+    std::cout << "Final Q-table:\n";
     printQTable();
+
+    // Test the final policy
+    std::cout << "Testing the final policy:\n";
+    State pigeon = {2, 0};
+    printGrid(pigeon);
+    while (!isTerminal(pigeon)) {
+        Action action = chooseAction(pigeon);
+        pigeon = takeAction(pigeon, action);
+        std::cout << "Action taken: " << actionToString(action) << std::endl;
+        printGrid(pigeon);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    std::cout << "Game Over.\n";
     return 0;
 }

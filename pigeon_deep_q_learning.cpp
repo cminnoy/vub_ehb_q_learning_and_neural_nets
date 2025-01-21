@@ -257,7 +257,7 @@ int main() {
     int episodes = 1000;
 
     double max_reward = -std::numeric_limits<double>::infinity();
-    int max_reward_encountered = 0;
+    unsigned int max_reward_encountered = 0;
     const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
 
     for (int episode = 0; episode < episodes; ++episode) {
@@ -290,16 +290,15 @@ int main() {
 
         // Early stopping logic
         if (total_reward < max_reward) {
-            max_reward_encountered = 0; // Reset counter if the reward decreases
+            max_reward_encountered = 0;
         } else if (total_reward > max_reward) {
-            max_reward = total_reward; // Update max reward
-            max_reward_encountered = 0; // Reset counter
+            max_reward = total_reward;
+            max_reward_encountered = 0;
         } else {
-            max_reward_encountered++; // Increment counter if reward remains the same
+            max_reward_encountered++;
         }
         if (max_reward_encountered >= early_stopping_threshold) {
-            std::cout << "Early stopping triggered after " << episode + 1
-                    << " episodes. Max reward = " << max_reward << ".\n";
+            std::cout << "Early stopping triggered after " << episode + 1 << " episodes. Max reward = " << max_reward << ".\n";
             break;
         }
 
