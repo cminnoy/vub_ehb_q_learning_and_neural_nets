@@ -12,26 +12,37 @@
 // Define actions
 enum class Action { Up, Down, Left, Right };
 
-// Define state as: (x, y, person_in_car)
+// Define state as: (x, y, person_x, person_y, person_in_car)
 struct State {
-    std::pair<int,int> location;
+    std::pair<int, int> location;
+    std::pair<int, int> person_location;
     bool person_in_car;
 
-    State(int x, int y, bool person_in_car) : location(x, y), person_in_car(person_in_car) {}
+    State(int x, int y, int pers_x, int pers_y, bool person_in_car)
+        : location(x, y), person_location(pers_x, pers_y), person_in_car(person_in_car) {}
 };
 
 bool operator==(const State &lhs, const State &rhs) {
-    return lhs.location == rhs.location and lhs.person_in_car == rhs.person_in_car;
+    return lhs.location == rhs.location and
+           lhs.person_location == rhs.person_location and
+           lhs.person_in_car == rhs.person_in_car;
+}
+
+std::ostream & operator<<(std::ostream &os, const State &state) {
+    os << "(" << state.location.first << "," << state.location.second << "," << state.person_location.first << ',' << state.person_location.second << ',' << state.person_in_car << ")";
+    return os;
 }
 
 // Specialize std::hash for State
 namespace std {
     template <>
     struct hash<State> {
-        std::size_t operator()(const State& state) const {
+        std::size_t operator()(const State &state) const {
             return std::hash<int>()(state.location.first) ^
                    (std::hash<int>()(state.location.second) << 1) ^
-                   (std::hash<bool>()(state.person_in_car) << 2);
+                   (std::hash<int>()(state.person_location.first) << 2) ^
+                   (std::hash<int>()(state.person_location.second) << 3) ^
+                   (std::hash<bool>()(state.person_in_car) << 4);
         }
     };
 }
@@ -43,7 +54,6 @@ std::unordered_map<State, std::unordered_map<Action, double>> Q_table;
 const int GRID_SIZE = 5;
 
 // Rewards
-const double REWARD_PERSON = 1.0;
 const double REWARD_HOME_SUCCESS = 10.0;
 const double REWARD_HOME_EMPTY = -10.0;
 const double REWARD_PIT = -10.0;
@@ -58,25 +68,30 @@ const double epsilon_decay = 0.995;
 const double alpha = 0.1;  // Learning rate
 const double Gamma = 0.9;  // Discount factor
 
-// Person waiting
+// Person location
+std::pair<int, int> person_location;
 bool person_waiting = true;
 
 // Random generator
 std::random_device rd;
 std::mt19937 gen(rd());
 std::uniform_real_distribution<> dis(0.0, 1.0);
+std::uniform_int_distribution<> random_location(0, GRID_SIZE - 1);
 
 // Function to get reward for a specific state
-double getReward(State const &state) {
-    if (state.location == std::make_pair(3,0) and state.person_in_car == false) { return REWARD_PERSON; }
-    if (state.location == std::make_pair(0,3)) return state.person_in_car ? REWARD_HOME_SUCCESS : REWARD_HOME_EMPTY;
-    if (state.location == std::make_pair(2,2)) return REWARD_PIT;
+double getReward(const State &state) {
+    if (state.location == std::make_pair(0, 3)) {
+        return state.person_in_car ? REWARD_HOME_SUCCESS : REWARD_HOME_EMPTY;
+    }
+    if (state.location == std::make_pair(2, 2)) {
+        return REWARD_PIT;
+    }
     return REWARD_EMPTY;
 }
 
 // Check if a state is terminal
 bool isTerminal(const State &state) {
-    return state.location == std::make_pair(2, 2) or state.location == std::make_pair(0, 3);
+    return state.location == std::make_pair(2, 2) || state.location == std::make_pair(0, 3);
 }
 
 // Get all possible actions
@@ -85,10 +100,10 @@ std::vector<Action> getActions() {
 }
 
 // Take an action and return the next state
-State takeAction(const State &state, Action const action) {
+State takeAction(const State &state, Action action) {
     int x = state.location.first;
     int y = state.location.second;
-    bool person = state.person_in_car;
+    bool person_in_car = state.person_in_car;
 
     auto action_allowed = [x, y](const State &state, Action action) -> bool {
         switch (action) {
@@ -110,31 +125,29 @@ State takeAction(const State &state, Action const action) {
         return false;
     };
 
+
     bool allowed = action_allowed(state, action);
     std::cout << "Allowed: " << (allowed ? "Yes" : "No") << std::endl;
     if (not allowed) return state;
 
     switch (action) {
-        case Action::Up:
-            x--;
-            break;
-        case Action::Down:
-            x++;
-            break;
-        case Action::Left:
-            y--;
-            break;
-        case Action::Right:
-            y++;
-            break;
+        case Action::Up: x--; break;
+        case Action::Down: x++; break;
+        case Action::Left: y--; break;
+        case Action::Right: y++; break;
     }
 
-    if (x == 3 and y == 0 and person_waiting) {
-        person = true;
+    // Picking up person
+    if (x == person_location.first && y == person_location.second && person_waiting) {
+        person_in_car = true;
         person_waiting = false;
     }
 
-    return {x, y, person};
+    // Return new state
+    if (person_in_car) // to reduce state space, we don't track person location when they are in the car
+        return {x, y, 0, 0, person_in_car};
+    else
+        return {x, y, person_location.first, person_location.second, person_in_car};
 }
 
 // Choose action using epsilon-greedy policy
@@ -165,7 +178,7 @@ void printGrid(const State &taxi) {
         for (int j = 0; j < GRID_SIZE; j++) {
             if (taxi.location == std::make_pair(i, j)) {
                 std::cout << "Tx ";
-            } else if (std::make_pair(i, j) == std::make_pair(3, 0)) {
+            } else if (std::make_pair(i, j) == person_location) {
                 if (person_waiting) std::cout << "Pe ";
                 else std::cout << ".  ";
             } else if (std::make_pair(i, j) == std::make_pair(0, 3)) {
@@ -190,62 +203,31 @@ std::string actionToString(Action action) {
     return "Unknown";
 }
 
-void printQTable() {
-    // Define action labels
-    const std::map<Action, std::string> action_labels = {
-        {Action::Up, "Up"},
-        {Action::Down, "Down"},
-        {Action::Left, "Left"},
-        {Action::Right, "Right"}
-    };
-
-    // Column width for alignment
-    const int col_width = 15;
-
-    // Print the header row with action labels
-    std::cout << std::setw(col_width) << "State\\Action";
-    for (const auto& [action, label] : action_labels) {
-        std::cout << std::setw(col_width) << label;
+auto generateRandomPersonLocation() {
+    std::pair<int, int> person_location = {random_location(gen), random_location(gen)};
+    while (person_location == std::make_pair(0, 3) || person_location == std::make_pair(2, 2)) {
+        person_location = {random_location(gen), random_location(gen)};
     }
-    std::cout << "\n";
-
-    // Print the Q-values for each state
-    for (int x = 0; x < GRID_SIZE; ++x) {
-        for (int y = 0; y < GRID_SIZE; ++y) {
-            for (bool person : {false, true}) { // Iterate over person_in_car values
-                State state(x, y, person);
-
-                // Print the state
-                std::string state_info = "(" + std::to_string(x) + "," + std::to_string(y) + "," + (person ? "P" : "NP") + ")";
-                std::cout << std::setw(col_width) << state_info;
-
-                // Print Q-values for actions
-                for (const auto& action : {Action::Up, Action::Down, Action::Left, Action::Right}) {
-                    if (Q_table[state].find(action) != Q_table[state].end()) {
-                        std::cout << std::setw(col_width) << std::fixed << std::setprecision(2) << Q_table[state][action];
-                    } else {
-                        std::cout << std::setw(col_width) << "0.00"; // Default Q-value if not present
-                    }
-                }
-
-                std::cout << "\n";
-            }
-        }
-    }
-
-    std::cout << "End of Q-Table.\n";
+    return person_location;
 }
 
-
 int main() {
-    unsigned int episodes = 500; // Number of episodes for training
+    const double min_delay = 1.0;       // in milliseconds
+    const double max_delay = 100.0;     // in milliseconds
+    unsigned int episodes = 4000; // Number of episodes for training
     unsigned int home_runs = 0; // Number of successful home runs
     double max_reward = -std::numeric_limits<double>::infinity();
     unsigned int max_reward_encountered = 0;
     const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
 
     for (int episode = 0; episode < episodes; ++episode) {
-        State taxi = {3, 1, false}; // Reset to start position
+        double progress = static_cast<double>(episode) / episodes;
+        double delay_ms = min_delay + (max_delay - min_delay) * std::log10(1 + 9 * progress);
+
+        // Randomly place the person
+        person_location = generateRandomPersonLocation();
+
+        State taxi = {3, 1, person_location.first, person_location.second, false};
         person_waiting = true;
         double total_reward = 0.0;
 
@@ -263,10 +245,13 @@ int main() {
             // Choose action
             Action action = chooseAction(taxi);
             std::cout << "Action taken: " << actionToString(action) << std::endl;
-            
+
             // Take action
+            std::cout << "Orignial state: " << taxi << std::endl;
             State next_state = takeAction(taxi, action);
+            std::cout << "Next state: " << next_state << std::endl;
             double reward = getReward(next_state);
+            std::cout << "Reward: " << reward << std::endl;
             total_reward += reward;
 
             // Update Q-value
@@ -279,13 +264,13 @@ int main() {
             Q_table[taxi][action] += alpha * (reward + Gamma * max_next_q - Q_table[taxi][action]);
             double new_q_value = Q_table[taxi][action];
 
-            std::cout << "Updated Q-value for state (" << taxi.location.first << "," << taxi.location.second << ") and action " << actionToString(action) << ": " << old_q_value << " -> " << new_q_value << std::endl;
+            std::cout << "Updated Q-value for state " << taxi << " and action " << actionToString(action) << ": " << old_q_value << " -> " << new_q_value << std::endl;
 
             taxi = next_state; // Move to the next state
             std::cout << "Total reward: " << total_reward << '\n';
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(delay_ms)));
         }
-        
+
         if (taxi.location == std::make_pair(0, 3) and taxi.person_in_car) {
             home_runs++;
         }
@@ -313,17 +298,18 @@ int main() {
     std::cout << "\x1b[2J\x1b[H"; // Clear the terminal
     std::cout << "Training complete.\n";
 
-    // After training loop
-    std::cout << "Final Q-table:\n";
-    printQTable();
-
     // Test the final policy
     std::cout << "Testing the final policy:\n";
-    State taxi = {3, 1, false};
+
+    // Reset the initial state
+    person_location = generateRandomPersonLocation();
+    State taxi = {3, 1, person_location.first, person_location.second, false};
     person_waiting = true;
+
     printGrid(taxi);
     unsigned int steps = 0;
     epsilon = 0.0; // No exploration
+
     while (!isTerminal(taxi)) {
         ++steps;
         Action action = chooseAction(taxi);
