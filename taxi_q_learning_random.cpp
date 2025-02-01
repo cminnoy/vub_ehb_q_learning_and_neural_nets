@@ -9,27 +9,34 @@
 #include <thread>
 #include <functional>
 
+using location_t = std::pair<int, int>;
+
+std::ostream & operator<<(std::ostream &os, const location_t &location) {
+    os << "(" << location.first << "," << location.second << ")";
+    return os;
+}
+
 // Define actions
 enum class Action { Up, Down, Left, Right };
 
 // Define state as: (x, y, person_x, person_y, person_in_car)
 struct State {
-    std::pair<int, int> location;
+    std::pair<int, int> taxi_location;
     std::pair<int, int> person_location;
     bool person_in_car;
 
-    State(int x, int y, int pers_x, int pers_y, bool person_in_car)
-        : location(x, y), person_location(pers_x, pers_y), person_in_car(person_in_car) {}
+    State(location_t taxi_location, location_t person_location, bool person_in_car)
+        : taxi_location(taxi_location), person_location(person_location), person_in_car(person_in_car) {}
 };
 
 bool operator==(const State &lhs, const State &rhs) {
-    return lhs.location == rhs.location and
+    return lhs.taxi_location == rhs.taxi_location and
            lhs.person_location == rhs.person_location and
            lhs.person_in_car == rhs.person_in_car;
 }
 
 std::ostream & operator<<(std::ostream &os, const State &state) {
-    os << "(" << state.location.first << "," << state.location.second << "," << state.person_location.first << ',' << state.person_location.second << ',' << state.person_in_car << ")";
+    os << "(" << state.taxi_location << "," << state.person_location << ',' << state.person_in_car << ")";
     return os;
 }
 
@@ -38,8 +45,8 @@ namespace std {
     template <>
     struct hash<State> {
         std::size_t operator()(const State &state) const {
-            return std::hash<int>()(state.location.first) ^
-                   (std::hash<int>()(state.location.second) << 1) ^
+            return std::hash<int>()(state.taxi_location.first) ^
+                   (std::hash<int>()(state.taxi_location.second) << 1) ^
                    (std::hash<int>()(state.person_location.first) << 2) ^
                    (std::hash<int>()(state.person_location.second) << 3) ^
                    (std::hash<bool>()(state.person_in_car) << 4);
@@ -68,8 +75,9 @@ const double epsilon_decay = 0.995;
 const double alpha = 0.1;  // Learning rate
 const double Gamma = 0.9;  // Discount factor
 
-// Person location
-std::pair<int, int> person_location;
+// Global environment
+location_t person_location;
+location_t taxi_location;
 bool person_waiting = true;
 
 // Random generator
@@ -78,12 +86,27 @@ std::mt19937 gen(rd());
 std::uniform_real_distribution<> dis(0.0, 1.0);
 std::uniform_int_distribution<> random_location(0, GRID_SIZE - 1);
 
+constexpr location_t HOME_LOCATION = {0, 3};
+constexpr location_t PIT_LOCATION = {2, 2};
+
+const std::vector<location_t> excludedLocations {HOME_LOCATION, PIT_LOCATION};
+
+auto generateRandomLocation(std::vector<location_t> const & excludedLocations) {
+    location_t location = {random_location(gen), random_location(gen)};
+    
+    while (std::find(excludedLocations.begin(), excludedLocations.end(), location) != excludedLocations.end()) {
+        location = {random_location(gen), random_location(gen)};
+    }
+
+    return location;
+}
+
 // Function to get reward for a specific state
 double getReward(const State &state) {
-    if (state.location == std::make_pair(0, 3)) {
+    if (state.taxi_location == HOME_LOCATION) {
         return state.person_in_car ? REWARD_HOME_SUCCESS : REWARD_HOME_EMPTY;
     }
-    if (state.location == std::make_pair(2, 2)) {
+    if (state.taxi_location == PIT_LOCATION) {
         return REWARD_PIT;
     }
     return REWARD_EMPTY;
@@ -91,7 +114,7 @@ double getReward(const State &state) {
 
 // Check if a state is terminal
 bool isTerminal(const State &state) {
-    return state.location == std::make_pair(2, 2) || state.location == std::make_pair(0, 3);
+    return state.taxi_location == PIT_LOCATION || state.taxi_location == HOME_LOCATION;
 }
 
 // Get all possible actions
@@ -101,8 +124,8 @@ std::vector<Action> getActions() {
 
 // Take an action and return the next state
 State takeAction(const State &state, Action action) {
-    int x = state.location.first;
-    int y = state.location.second;
+    int x = state.taxi_location.first;
+    int y = state.taxi_location.second;
     bool person_in_car = state.person_in_car;
 
     auto action_allowed = [x, y](const State &state, Action action) -> bool {
@@ -110,17 +133,17 @@ State takeAction(const State &state, Action action) {
             case Action::Up: return x > 0;
             case Action::Down: return x < GRID_SIZE - 1;
             case Action::Left: return y > 0 and
-                                !(state.location == std::make_pair(0, 2) or
-                                  state.location == std::make_pair(3, 1) or
-                                  state.location == std::make_pair(4, 1) or
-                                  state.location == std::make_pair(3, 2) or
-                                  state.location == std::make_pair(4, 2));
+                                !(state.taxi_location == std::make_pair(0, 2) or
+                                  state.taxi_location == std::make_pair(3, 1) or
+                                  state.taxi_location == std::make_pair(4, 1) or
+                                  state.taxi_location == std::make_pair(3, 2) or
+                                  state.taxi_location == std::make_pair(4, 2));
             case Action::Right: return y < GRID_SIZE - 1 and
-                                !(state.location == std::make_pair(0, 1) or
-                                  state.location == std::make_pair(3, 0) or
-                                  state.location == std::make_pair(4, 0) or
-                                  state.location == std::make_pair(3, 1) or
-                                  state.location == std::make_pair(4, 1));
+                                !(state.taxi_location == std::make_pair(0, 1) or
+                                  state.taxi_location == std::make_pair(3, 0) or
+                                  state.taxi_location == std::make_pair(4, 0) or
+                                  state.taxi_location == std::make_pair(3, 1) or
+                                  state.taxi_location == std::make_pair(4, 1));
         }
         return false;
     };
@@ -145,9 +168,9 @@ State takeAction(const State &state, Action action) {
 
     // Return new state
     if (person_in_car) // to reduce state space, we don't track person location when they are in the car
-        return {x, y, 0, 0, person_in_car};
+        return { {x, y}, {0, 0}, person_in_car};
     else
-        return {x, y, person_location.first, person_location.second, person_in_car};
+        return { {x, y}, person_location, person_in_car};
 }
 
 // Choose action using epsilon-greedy policy
@@ -173,17 +196,17 @@ Action chooseAction(const State &state) {
 }
 
 // Print the grid state
-void printGrid(const State &taxi) {
+void printGrid(const State & state) {
     for (int i = 0; i < GRID_SIZE; i++) {
         for (int j = 0; j < GRID_SIZE; j++) {
-            if (taxi.location == std::make_pair(i, j)) {
+            if (std::make_pair(i, j) == state.taxi_location) {
                 std::cout << "Tx ";
             } else if (std::make_pair(i, j) == person_location) {
                 if (person_waiting) std::cout << "Pe ";
                 else std::cout << ".  ";
-            } else if (std::make_pair(i, j) == std::make_pair(0, 3)) {
+            } else if (std::make_pair(i, j) == HOME_LOCATION) {
                 std::cout << "Ho ";
-            } else if (std::make_pair(i, j) == std::make_pair(2, 2)) {
+            } else if (std::make_pair(i, j) == PIT_LOCATION) {
                 std::cout << "Pt ";
             } else {
                 std::cout << ".  ";
@@ -203,14 +226,6 @@ std::string actionToString(Action action) {
     return "Unknown";
 }
 
-auto generateRandomPersonLocation() {
-    std::pair<int, int> person_location = {random_location(gen), random_location(gen)};
-    while (person_location == std::make_pair(0, 3) || person_location == std::make_pair(2, 2)) {
-        person_location = {random_location(gen), random_location(gen)};
-    }
-    return person_location;
-}
-
 int main() {
     const double min_delay = 1.0;       // in milliseconds
     const double max_delay = 100.0;     // in milliseconds
@@ -224,31 +239,33 @@ int main() {
         double progress = static_cast<double>(episode) / episodes;
         double delay_ms = min_delay + (max_delay - min_delay) * std::log10(1 + 9 * progress);
 
-        // Randomly place the person
-        person_location = generateRandomPersonLocation();
-
-        State taxi = {3, 1, person_location.first, person_location.second, false};
+        // Reset environment
+        person_location = generateRandomLocation(excludedLocations);
+        do {
+            taxi_location = generateRandomLocation(excludedLocations);
+        } while (taxi_location == person_location);
+        State state = { taxi_location, person_location, false};
         person_waiting = true;
         double total_reward = 0.0;
 
-        while (!isTerminal(taxi)) {
+        while (!isTerminal(state)) {
             std::cout << "\x1b[2J\x1b[H"; // Clear the terminal
             std::cout << "Episode " << (episode + 1) <<
-                         "  (person in car " << taxi.person_in_car <<
+                         "  (person in car " << state.person_in_car <<
                          ", person waiting " << person_waiting <<
                          ", epsilon " << epsilon <<
                          ", max reward " << max_reward <<
                          ", home runs " << home_runs <<
                          "):\n";
-            printGrid(taxi);
+            printGrid(state);
 
             // Choose action
-            Action action = chooseAction(taxi);
+            Action action = chooseAction(state);
             std::cout << "Action taken: " << actionToString(action) << std::endl;
 
             // Take action
-            std::cout << "Orignial state: " << taxi << std::endl;
-            State next_state = takeAction(taxi, action);
+            std::cout << "Orignial state: " << state << std::endl;
+            State next_state = takeAction(state, action);
             std::cout << "Next state: " << next_state << std::endl;
             double reward = getReward(next_state);
             std::cout << "Reward: " << reward << std::endl;
@@ -260,18 +277,20 @@ int main() {
                 max_next_q = std::max(max_next_q, Q_table[next_state][next_action]);
             }
 
-            double old_q_value = Q_table[taxi][action];
-            Q_table[taxi][action] += alpha * (reward + Gamma * max_next_q - Q_table[taxi][action]);
-            double new_q_value = Q_table[taxi][action];
+            double old_q_value = Q_table[state][action];
+            Q_table[state][action] += alpha * (reward + Gamma * max_next_q - Q_table[state][action]);
+            double new_q_value = Q_table[state][action];
 
-            std::cout << "Updated Q-value for state " << taxi << " and action " << actionToString(action) << ": " << old_q_value << " -> " << new_q_value << std::endl;
+            std::cout << "Updated Q-value for state " << state << " and action " << actionToString(action) << ": " << old_q_value << " -> " << new_q_value << std::endl;
 
-            taxi = next_state; // Move to the next state
+            state = next_state; // Move to the next state
             std::cout << "Total reward: " << total_reward << '\n';
+            std::cout << "Q-table size: " << Q_table.size() << '\n';
+
             std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(delay_ms)));
         }
 
-        if (taxi.location == std::make_pair(0, 3) and taxi.person_in_car) {
+        if (state.taxi_location == HOME_LOCATION and state.person_in_car) {
             home_runs++;
         }
 
@@ -301,21 +320,24 @@ int main() {
     // Test the final policy
     std::cout << "Testing the final policy:\n";
 
-    // Reset the initial state
-    person_location = generateRandomPersonLocation();
-    State taxi = {3, 1, person_location.first, person_location.second, false};
+    // Reset environment
+    person_location = generateRandomLocation(excludedLocations);
+    do {
+        taxi_location = generateRandomLocation(excludedLocations);
+    } while (taxi_location == person_location);
+    State state = { taxi_location, person_location, false};
     person_waiting = true;
 
-    printGrid(taxi);
+    printGrid(state);
     unsigned int steps = 0;
     epsilon = 0.0; // No exploration
 
-    while (!isTerminal(taxi)) {
+    while (!isTerminal(state)) {
         ++steps;
-        Action action = chooseAction(taxi);
-        taxi = takeAction(taxi, action);
+        Action action = chooseAction(state);
+        state = takeAction(state, action);
         std::cout << "Action taken: " << actionToString(action) << std::endl;
-        printGrid(taxi);
+        printGrid(state);
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         if (steps > 20) {
             std::cout << "Too many steps. Exiting.\n";
