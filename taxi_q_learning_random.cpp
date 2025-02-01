@@ -69,7 +69,7 @@ const double REWARD_EMPTY = -1.0;
 // Epsilon decay parameters
 double epsilon = 1.0; // Start with full exploration
 const double epsilon_min = 0.01;
-const double epsilon_decay = 0.995;
+const double epsilon_decay = 0.997;
 
 // Learning rate and discount factor
 const double alpha = 0.1;  // Learning rate
@@ -127,7 +127,7 @@ State takeAction(const State &state, Action action) {
     int x = state.taxi_location.first;
     int y = state.taxi_location.second;
     bool person_in_car = state.person_in_car;
-
+    
     auto action_allowed = [x, y](const State &state, Action action) -> bool {
         switch (action) {
             case Action::Up: return x > 0;
@@ -199,18 +199,24 @@ Action chooseAction(const State &state) {
 void printGrid(const State & state) {
     for (int i = 0; i < GRID_SIZE; i++) {
         for (int j = 0; j < GRID_SIZE; j++) {
-            if (std::make_pair(i, j) == state.taxi_location) {
-                std::cout << "Tx ";
-            } else if (std::make_pair(i, j) == person_location) {
-                if (person_waiting) std::cout << "Pe ";
-                else std::cout << ".  ";
-            } else if (std::make_pair(i, j) == HOME_LOCATION) {
-                std::cout << "Ho ";
-            } else if (std::make_pair(i, j) == PIT_LOCATION) {
-                std::cout << "Pt ";
+            location_t location = {i, j};
+            std::string s;
+            if (location == state.taxi_location) {
+                s = "Tx ";
+            } else if (location == person_location) {
+                if (person_waiting) s = "Pe ";
+                else s = ".  ";
+            } else if (location == HOME_LOCATION) {
+                s = "Ho ";
+            } else if (location == PIT_LOCATION) {
+                s = "Pt ";
             } else {
-                std::cout << ".  ";
+                s = ".  ";
             }
+    if (location == location_t(0, 1) or location == location_t(3,0) or location == location_t(4,0) or location == location_t(3,1) or location == location_t(4,1)) {
+                s[2] = '|';
+            }
+            std::cout << s;
         }
         std::cout << std::endl;
     }
