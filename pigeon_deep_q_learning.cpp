@@ -258,7 +258,7 @@ int main() {
 
     double max_reward = -std::numeric_limits<double>::infinity();
     unsigned int max_reward_encountered = 0;
-    const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
+    const int early_stopping_threshold = 20; // Number of episodes to trigger early stopping
 
     for (int episode = 0; episode < episodes; ++episode) {
         State pigeon = {2, 0}; // Starting position
@@ -277,9 +277,12 @@ int main() {
             total_reward += reward;
 
             // Update neural network
-            std::vector<double> target(4, 0.0);
             std::vector<double> q_values = net.forward(pigeon);
-            target[static_cast<int>(action)] = reward + Gamma * *std::max_element(q_values.begin(), q_values.end());
+            std::vector<double> next_q_values = net.forward(next_state);
+            double max_next_q_value = *std::max_element(next_q_values.begin(), next_q_values.end());
+
+            std::vector<double> target = q_values;
+            target[static_cast<int>(action)] = reward + Gamma * max_next_q_value;
 
             // Backpropagation
             net.backward(pigeon, target, learning_rate);

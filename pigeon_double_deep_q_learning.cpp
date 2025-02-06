@@ -262,7 +262,7 @@ int main() {
 
     double max_reward = -std::numeric_limits<double>::infinity();
     unsigned int max_reward_encountered = 0;
-    const int early_stopping_threshold = 10; // Number of episodes to trigger early stopping
+    const int early_stopping_threshold = 20; // Number of episodes to trigger early stopping
 
     for (int episode = 0; episode < episodes; ++episode) {
         State pigeon = {2, 0}; // Starting position
